@@ -9,7 +9,8 @@
   <link rel="preload" as="image" href="https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif" fetchpriority="high">
 
   <style>
-    :root { --bg:#fff7fb; --text:#1f1f1f; }
+    :root { --bg:#fff7fb; --text:#1f1f1f; --sheetH: 0px; }
+
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; }
 
@@ -41,24 +42,26 @@
       box-shadow: 0 12px 30px rgba(0,0,0,.08);
       text-align:center;
       position: relative;
-      overflow: hidden; /* keeps No inside */
     }
 
+    /* ✅ GIF sizing that looks good on iPhone */
     .gif{
-      width:100%;
+      width: 100%;
       max-width: 420px;
-      aspect-ratio: 1 / 1;
-      object-fit: cover;
-      border-radius:14px;
+      height: auto;
+      max-height: 32vh;        /* keeps it from dominating the screen */
+      border-radius: 14px;
       display:block;
-      margin:0 auto 14px;
+      margin: 0 auto 12px;
       background:#f3f3f7;
+      object-fit: contain;     /* no weird cropping */
     }
 
     h1{
       font-size: clamp(22px, 5.5vw, 34px);
-      margin: 8px 0 16px;
+      margin: 6px 0 14px;
       line-height: 1.15;
+      padding: 0 4px;
     }
 
     .btnRow{
@@ -70,6 +73,7 @@
       margin-top: 6px;
       min-height: 72px;
       padding-bottom: 6px;
+      z-index: 1; /* stays above card, but will be covered by bottom sheet if needed */
     }
 
     button{
@@ -77,21 +81,18 @@
       cursor:pointer;
       border-radius: 16px;
       padding: 14px 20px;
-      min-height: 48px;     /* iPhone-friendly touch target */
-      min-width: 120px;
+      min-height: 48px;     /* Apple touch target */
+      min-width: 140px;
       font-size: 18px;
       font-weight: 800;
       user-select: none;
       touch-action: manipulation;
-      transition: transform 140ms ease, font-size 240ms ease, width 240ms ease, height 240ms ease;
       line-height: 1.1;
     }
 
     #yesBtn{
       background:#ff4d88;
       color:#fff;
-      transform-origin: center;
-      will-change: transform;
     }
 
     #noBtn{
@@ -99,44 +100,10 @@
       color:#222;
       position: relative;
       will-change: transform;
+      transition: transform 140ms ease;
     }
 
-    /*
-      ✅ Partial takeover mode:
-      - Yes becomes a fixed bottom panel covering the lower part of the screen
-      - The question (top) stays visible
-      - No is hidden
-    */
-    .partial-yes #yesBtn{
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-
-      /* cover the lower part of the screen */
-      height: 52dvh;
-      height: 52vh; /* fallback */
-      border-radius: 22px 22px 0 0;
-
-      /* keep iPhone safe areas */
-      padding:
-        16px
-        calc(16px + env(safe-area-inset-right))
-        calc(18px + env(safe-area-inset-bottom))
-        calc(16px + env(safe-area-inset-left));
-
-      font-size: clamp(26px, 7vw, 64px);
-      z-index: 9999;
-
-      /* ensure it fills width nicely */
-      width: 100vw;
-
-      /* override any scale transform so it feels like a takeover */
-      transform: none !important;
-    }
-    .partial-yes #noBtn{ display:none; }
-
-    #success{ display:none; }
+    #success { display:none; }
     #success h2{
       font-size: clamp(24px, 6vw, 42px);
       margin: 10px 0 8px;
@@ -150,8 +117,62 @@
       opacity: .75;
     }
 
+    /* ✅ Bottom sheet takeover (grows smoothly) */
+    #yesSheet{
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+
+      height: var(--sheetH);
+      max-height: 60dvh; /* keeps question visible */
+      max-height: 60vh;
+
+      background: rgba(255, 77, 136, 0.98);
+      border-radius: 22px 22px 0 0;
+
+      padding:
+        14px
+        calc(16px + env(safe-area-inset-right))
+        calc(18px + env(safe-area-inset-bottom))
+        calc(16px + env(safe-area-inset-left));
+
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+
+      z-index: 9999;
+
+      transform: translateZ(0);
+      transition: height 220ms ease;
+      pointer-events: none; /* only the button inside should be clickable when shown */
+      overflow: hidden;
+    }
+
+    #yesSheet .sheetBtn{
+      pointer-events: auto;
+      width: 100%;
+      max-width: 560px;
+      border: 0;
+      border-radius: 18px;
+      background: transparent;
+      color: #fff;
+      font-weight: 900;
+      font-size: clamp(26px, 7vw, 60px);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    /* When sheet is active, we hide the original Yes button so there's no duplicate */
+    body.sheet-active #yesBtn{
+      visibility: hidden;
+      pointer-events: none;
+    }
+
     @media (prefers-reduced-motion: reduce) {
-      button { transition: none; }
+      #yesSheet { transition: none; }
+      #noBtn { transition: none; }
     }
   </style>
 </head>
@@ -167,6 +188,7 @@
         decoding="async"
         fetchpriority="high"
       />
+
       <h1 id="question">Will you be my valentine? 💘</h1>
 
       <div class="btnRow" id="btnRow">
@@ -190,12 +212,17 @@
     </section>
   </main>
 
+  <!-- ✅ Fixed bottom sheet that grows and covers No -->
+  <div id="yesSheet" aria-hidden="true">
+    <button class="sheetBtn" id="sheetYesBtn" type="button">Yes</button>
+  </div>
+
   <script>
-    // Same GIF URLs from your original code
+    // Same GIF URLs
     const TOP_GIF = "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif";
     const BOTTOM_GIF = "https://media.giphy.com/media/MDJ9IbxxvDUQM/giphy.gif";
 
-    // Option A (creative No progression)
+    // Option A No progression
     const NO_LINES = [
       "No",
       "Are you sure? 😳",
@@ -223,9 +250,12 @@
     const bottomGif = document.getElementById("bottomGif");
     const loadingHint = document.getElementById("loadingHint");
 
+    const yesSheet = document.getElementById("yesSheet");
+    const sheetYesBtn = document.getElementById("sheetYesBtn");
+
     let noClicks = 0;
 
-    // --- Preload bottom gif smartly ---
+    // --- Preload bottom GIF smartly ---
     let bottomReady = false;
     let preloadStarted = false;
 
@@ -244,37 +274,45 @@
       img.onerror = () => { bottomReady = true; loadingHint.style.display = "none"; };
       img.src = BOTTOM_GIF;
 
-      // show hint only if it’s still not ready soon
       setTimeout(() => {
         if (!bottomReady) loadingHint.style.display = "block";
       }, 500);
     }
 
     topGif.addEventListener("load", () => {
-      // Don’t compete with first paint; preload later
       whenIdle(preloadBottomGif);
     }, { once: true });
 
-    // --- No text changes (Option A) ---
+    // --- No text changes ---
     function updateNoText(clicks){
-      // clicks starts at 1
       const idx = Math.min(clicks, NO_LINES.length - 1);
       noBtn.textContent = NO_LINES[idx];
     }
 
-    // --- Yes growth ---
-    function setYesScale(clicks){
-      const scale = 1 + clicks * 0.35;
-      yesBtn.style.transform = `scale(${Math.min(scale, 6)})`;
+    // --- Bottom sheet growth ---
+    function setSheetHeight(clicks){
+      // Start growing after 2 clicks; feel smooth and “inevitable”
+      // Clamp so it never hides the question entirely.
+      const start = 2;
+      const maxVh = 60; // cap
+      const stepVh = 6; // each click adds ~6vh
+
+      const effective = Math.max(0, clicks - start);
+      const targetVh = Math.min(maxVh, effective * stepVh);
+
+      if (targetVh <= 0) {
+        document.body.classList.remove("sheet-active");
+        document.documentElement.style.setProperty("--sheetH", "0px");
+        yesSheet.setAttribute("aria-hidden", "true");
+        return;
+      }
+
+      document.body.classList.add("sheet-active");
+      yesSheet.setAttribute("aria-hidden", "false");
+      document.documentElement.style.setProperty("--sheetH", `${targetVh}vh`);
     }
 
-    // ✅ Instead of full screen, take over lower part only
-    function maybePartialTakeover(clicks){
-      // tweak this threshold if you want earlier/later takeover
-      if (clicks >= 8) document.body.classList.add("partial-yes");
-    }
-
-    // --- No button movement (clamped within card) ---
+    // --- No button movement (small + contained, doesn’t fight the sheet) ---
     let noOffset = { x: 0, y: 0 };
     function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
 
@@ -285,10 +323,10 @@
       const noRect = noBtn.getBoundingClientRect();
 
       const maxX = Math.max(0, (cardRect.width - (noRect.width + 36)) / 2);
-      const maxY = Math.max(0, (cardRect.height - (noRect.height + 260)) / 2);
+      const maxY = 30; // keep it subtle for iPhone
 
-      const stepX = Math.min(50, maxX);
-      const stepY = Math.min(35, maxY);
+      const stepX = Math.min(36, maxX);
+      const stepY = maxY;
 
       const dx = (Math.random() * 2 - 1) * stepX;
       const dy = (Math.random() * 2 - 1) * stepY;
@@ -303,10 +341,8 @@
       noClicks += 1;
 
       updateNoText(noClicks);
-
-      setYesScale(noClicks);
+      setSheetHeight(noClicks);   // ✅ sheet grows instead of scaling Yes
       nudgeNoButton();
-      maybePartialTakeover(noClicks);
       preloadBottomGif();
     }
 
@@ -316,32 +352,31 @@
       if (transitioning) return;
       transitioning = true;
 
-      // Remove takeover mode so the success screen looks normal
-      document.body.classList.remove("partial-yes");
+      // Remove sheet
+      document.body.classList.remove("sheet-active");
+      document.documentElement.style.setProperty("--sheetH", "0px");
+      yesSheet.setAttribute("aria-hidden", "true");
 
       preloadBottomGif();
       if (!bottomReady) loadingHint.style.display = "block";
 
-      // Switch screens
       ask.style.display = "none";
       success.style.display = "block";
-
       bottomGif.src = BOTTOM_GIF;
 
-      // Reset (in case you ever reuse the screen)
+      // Reset (for cleanliness)
       noBtn.textContent = "No";
-      yesBtn.style.transform = "scale(1)";
       noBtn.style.transform = "translate(0,0)";
       noOffset = { x: 0, y: 0 };
       loadingHint.style.display = "none";
-
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
-    noBtn.addEventListener("click", onNo);
+    // Both Yes buttons trigger the same action
     yesBtn.addEventListener("click", onYes);
+    sheetYesBtn.addEventListener("click", onYes);
+    noBtn.addEventListener("click", onNo);
 
-    // Optional keyboard support (nice on iPad)
+    // Optional keyboard support
     document.addEventListener("keydown", (e) => {
       if (e.key === "Enter") onYes();
       if (e.key === "Escape") onNo();
