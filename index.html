@@ -10,14 +10,11 @@
 
   <style>
     :root { --bg:#fff7fb; --text:#1f1f1f; }
-
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
     html, body { height: 100%; }
 
     body{
       margin:0;
-      /* iOS Safari viewport fixes */
       min-height: 100vh;
       min-height: 100dvh;
       min-height: -webkit-fill-available;
@@ -29,7 +26,6 @@
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--text);
 
-      /* Safe area padding for notch + home bar */
       padding:
         calc(12px + env(safe-area-inset-top))
         calc(12px + env(safe-area-inset-right))
@@ -45,13 +41,13 @@
       box-shadow: 0 12px 30px rgba(0,0,0,.08);
       text-align:center;
       position: relative;
-      overflow: hidden; /* important so the No button stays within bounds */
+      overflow: hidden; /* keeps No inside */
     }
 
     .gif{
       width:100%;
       max-width: 420px;
-      aspect-ratio: 1 / 1; /* prevents layout shift */
+      aspect-ratio: 1 / 1;
       object-fit: cover;
       border-radius:14px;
       display:block;
@@ -87,7 +83,8 @@
       font-weight: 800;
       user-select: none;
       touch-action: manipulation;
-      transition: transform 140ms ease, font-size 240ms ease;
+      transition: transform 140ms ease, font-size 240ms ease, width 240ms ease, height 240ms ease;
+      line-height: 1.1;
     }
 
     #yesBtn{
@@ -100,27 +97,44 @@
     #noBtn{
       background:#e9e9ef;
       color:#222;
-      position: relative; /* we’ll translate it, but keep within card overflow */
+      position: relative;
       will-change: transform;
     }
 
-    /* Fullscreen Yes takeover (iOS safe-area aware) */
-    .fullscreen-yes #yesBtn{
+    /*
+      ✅ Partial takeover mode:
+      - Yes becomes a fixed bottom panel covering the lower part of the screen
+      - The question (top) stays visible
+      - No is hidden
+    */
+    .partial-yes #yesBtn{
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      width: 100vw;
-      height: 100dvh;
-      height: -webkit-fill-available;
-      border-radius: 0;
-      font-size: clamp(28px, 10vw, 90px);
-      z-index: 9999;
+      left: 0;
+      right: 0;
+      bottom: 0;
+
+      /* cover the lower part of the screen */
+      height: 52dvh;
+      height: 52vh; /* fallback */
+      border-radius: 22px 22px 0 0;
+
+      /* keep iPhone safe areas */
       padding:
-        calc(18px + env(safe-area-inset-top))
-        calc(18px + env(safe-area-inset-right))
-        calc(24px + env(safe-area-inset-bottom))
-        calc(18px + env(safe-area-inset-left));
+        16px
+        calc(16px + env(safe-area-inset-right))
+        calc(18px + env(safe-area-inset-bottom))
+        calc(16px + env(safe-area-inset-left));
+
+      font-size: clamp(26px, 7vw, 64px);
+      z-index: 9999;
+
+      /* ensure it fills width nicely */
+      width: 100vw;
+
+      /* override any scale transform so it feels like a takeover */
+      transform: none !important;
     }
-    .fullscreen-yes #noBtn{ display:none; }
+    .partial-yes #noBtn{ display:none; }
 
     #success{ display:none; }
     #success h2{
@@ -136,7 +150,6 @@
       opacity: .75;
     }
 
-    /* If user prefers reduced motion, don’t move the No button around */
     @media (prefers-reduced-motion: reduce) {
       button { transition: none; }
     }
@@ -154,7 +167,7 @@
         decoding="async"
         fetchpriority="high"
       />
-      <h1>Will you be my valentine? 💘</h1>
+      <h1 id="question">Will you be my valentine? 💘</h1>
 
       <div class="btnRow" id="btnRow">
         <button id="yesBtn" type="button">Yes</button>
@@ -178,8 +191,25 @@
   </main>
 
   <script>
+    // Same GIF URLs from your original code
     const TOP_GIF = "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif";
     const BOTTOM_GIF = "https://media.giphy.com/media/MDJ9IbxxvDUQM/giphy.gif";
+
+    // Option A (creative No progression)
+    const NO_LINES = [
+      "No",
+      "Are you sure? 😳",
+      "Really sure??",
+      "Like… 100% sure?",
+      "Wait wait wait—hold on 🥺",
+      "Don’t do this to me 😭",
+      "I’m gonna cry fr",
+      "Last chance… please? 💘",
+      "Okay but imagine how cute we’d be",
+      "Fine… but I’ll be sad forever 😔",
+      "*taps mic*… hello??",
+      "Nope isn’t an option anymore 😌"
+    ];
 
     const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
@@ -188,7 +218,6 @@
     const ask    = document.getElementById("ask");
     const success= document.getElementById("success");
     const card   = document.getElementById("card");
-    const btnRow = document.getElementById("btnRow");
 
     const topGif = document.getElementById("topGif");
     const bottomGif = document.getElementById("bottomGif");
@@ -226,31 +255,37 @@
       whenIdle(preloadBottomGif);
     }, { once: true });
 
+    // --- No text changes (Option A) ---
+    function updateNoText(clicks){
+      // clicks starts at 1
+      const idx = Math.min(clicks, NO_LINES.length - 1);
+      noBtn.textContent = NO_LINES[idx];
+    }
+
     // --- Yes growth ---
     function setYesScale(clicks){
       const scale = 1 + clicks * 0.35;
       yesBtn.style.transform = `scale(${Math.min(scale, 6)})`;
     }
 
-    function maybeFullscreen(clicks){
-      if (clicks >= 8) document.body.classList.add("fullscreen-yes");
+    // ✅ Instead of full screen, take over lower part only
+    function maybePartialTakeover(clicks){
+      // tweak this threshold if you want earlier/later takeover
+      if (clicks >= 8) document.body.classList.add("partial-yes");
     }
 
     // --- No button movement (clamped within card) ---
     let noOffset = { x: 0, y: 0 };
-
     function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
 
     function nudgeNoButton(){
       if (prefersReducedMotion) return;
 
-      // Compute how far we can move inside the card without going off-screen
       const cardRect = card.getBoundingClientRect();
       const noRect = noBtn.getBoundingClientRect();
 
-      // We’re translating relative to its current spot, so approximate max translation
       const maxX = Math.max(0, (cardRect.width - (noRect.width + 36)) / 2);
-      const maxY = Math.max(0, (cardRect.height - (noRect.height + 260)) / 2); // keep it near the buttons area
+      const maxY = Math.max(0, (cardRect.height - (noRect.height + 260)) / 2);
 
       const stepX = Math.min(50, maxX);
       const stepY = Math.min(35, maxY);
@@ -266,24 +301,35 @@
 
     function onNo(){
       noClicks += 1;
+
+      updateNoText(noClicks);
+
       setYesScale(noClicks);
       nudgeNoButton();
-      maybeFullscreen(noClicks);
+      maybePartialTakeover(noClicks);
       preloadBottomGif();
     }
 
+    let transitioning = false;
+
     function onYes(){
-      document.body.classList.remove("fullscreen-yes");
+      if (transitioning) return;
+      transitioning = true;
+
+      // Remove takeover mode so the success screen looks normal
+      document.body.classList.remove("partial-yes");
 
       preloadBottomGif();
       if (!bottomReady) loadingHint.style.display = "block";
 
+      // Switch screens
       ask.style.display = "none";
       success.style.display = "block";
 
       bottomGif.src = BOTTOM_GIF;
 
-      // Reset
+      // Reset (in case you ever reuse the screen)
+      noBtn.textContent = "No";
       yesBtn.style.transform = "scale(1)";
       noBtn.style.transform = "translate(0,0)";
       noOffset = { x: 0, y: 0 };
@@ -292,11 +338,10 @@
       card.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
-    // Tap-friendly listeners
     noBtn.addEventListener("click", onNo);
     yesBtn.addEventListener("click", onYes);
 
-    // Optional: keyboard support (helpful on iPad)
+    // Optional keyboard support (nice on iPad)
     document.addEventListener("keydown", (e) => {
       if (e.key === "Enter") onYes();
       if (e.key === "Escape") onNo();
