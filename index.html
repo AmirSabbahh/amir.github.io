@@ -5,11 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>💘 Valentine?</title>
 
-  <!-- Preload first gif -->
   <link rel="preload" as="image" href="https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif" fetchpriority="high">
 
   <style>
-    :root { --bg:#fff7fb; --text:#1f1f1f; --sheetH: 0px; }
+    :root { --bg:#fff7fb; --text:#1f1f1f; }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; }
@@ -44,17 +43,18 @@
       position: relative;
     }
 
-    /* ✅ GIF sizing that looks good on iPhone */
+    /* ✅ iPhone-friendly GIF sizing: no forced square */
     .gif{
       width: 100%;
       max-width: 420px;
       height: auto;
-      max-height: 32vh;        /* keeps it from dominating the screen */
+      max-height: 32dvh;
+      max-height: 32vh;
       border-radius: 14px;
       display:block;
       margin: 0 auto 12px;
       background:#f3f3f7;
-      object-fit: contain;     /* no weird cropping */
+      object-fit: contain;
     }
 
     h1{
@@ -73,7 +73,6 @@
       margin-top: 6px;
       min-height: 72px;
       padding-bottom: 6px;
-      z-index: 1; /* stays above card, but will be covered by bottom sheet if needed */
     }
 
     button{
@@ -93,6 +92,7 @@
     #yesBtn{
       background:#ff4d88;
       color:#fff;
+      will-change: transform, width, height, left, top;
     }
 
     #noBtn{
@@ -101,6 +101,18 @@
       position: relative;
       will-change: transform;
       transition: transform 140ms ease;
+    }
+
+    /* ✅ During takeover, No cannot be clicked */
+    body.takeover #noBtn{
+      pointer-events: none;
+    }
+
+    /* ✅ Yes takeover mode (same button, fixed) */
+    body.takeover #yesBtn{
+      position: fixed;
+      z-index: 9999;
+      margin: 0;
     }
 
     #success { display:none; }
@@ -117,61 +129,7 @@
       opacity: .75;
     }
 
-    /* ✅ Bottom sheet takeover (grows smoothly) */
-    #yesSheet{
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-
-      height: var(--sheetH);
-      max-height: 60dvh; /* keeps question visible */
-      max-height: 60vh;
-
-      background: rgba(255, 77, 136, 0.98);
-      border-radius: 22px 22px 0 0;
-
-      padding:
-        14px
-        calc(16px + env(safe-area-inset-right))
-        calc(18px + env(safe-area-inset-bottom))
-        calc(16px + env(safe-area-inset-left));
-
-      display: flex;
-      align-items: stretch;
-      justify-content: center;
-
-      z-index: 9999;
-
-      transform: translateZ(0);
-      transition: height 220ms ease;
-      pointer-events: none; /* only the button inside should be clickable when shown */
-      overflow: hidden;
-    }
-
-    #yesSheet .sheetBtn{
-      pointer-events: auto;
-      width: 100%;
-      max-width: 560px;
-      border: 0;
-      border-radius: 18px;
-      background: transparent;
-      color: #fff;
-      font-weight: 900;
-      font-size: clamp(26px, 7vw, 60px);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-    }
-
-    /* When sheet is active, we hide the original Yes button so there's no duplicate */
-    body.sheet-active #yesBtn{
-      visibility: hidden;
-      pointer-events: none;
-    }
-
     @media (prefers-reduced-motion: reduce) {
-      #yesSheet { transition: none; }
       #noBtn { transition: none; }
     }
   </style>
@@ -212,17 +170,10 @@
     </section>
   </main>
 
-  <!-- ✅ Fixed bottom sheet that grows and covers No -->
-  <div id="yesSheet" aria-hidden="true">
-    <button class="sheetBtn" id="sheetYesBtn" type="button">Yes</button>
-  </div>
-
   <script>
-    // Same GIF URLs
     const TOP_GIF = "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif";
     const BOTTOM_GIF = "https://media.giphy.com/media/MDJ9IbxxvDUQM/giphy.gif";
 
-    // Option A No progression
     const NO_LINES = [
       "No",
       "Are you sure? 😳",
@@ -245,15 +196,15 @@
     const ask    = document.getElementById("ask");
     const success= document.getElementById("success");
     const card   = document.getElementById("card");
+    const btnRow = document.getElementById("btnRow");
 
     const topGif = document.getElementById("topGif");
     const bottomGif = document.getElementById("bottomGif");
     const loadingHint = document.getElementById("loadingHint");
-
-    const yesSheet = document.getElementById("yesSheet");
-    const sheetYesBtn = document.getElementById("sheetYesBtn");
+    const question = document.getElementById("question");
 
     let noClicks = 0;
+    let takeoverActive = false;
 
     // --- Preload bottom GIF smartly ---
     let bottomReady = false;
@@ -279,9 +230,7 @@
       }, 500);
     }
 
-    topGif.addEventListener("load", () => {
-      whenIdle(preloadBottomGif);
-    }, { once: true });
+    topGif.addEventListener("load", () => whenIdle(preloadBottomGif), { once:true });
 
     // --- No text changes ---
     function updateNoText(clicks){
@@ -289,47 +238,21 @@
       noBtn.textContent = NO_LINES[idx];
     }
 
-    // --- Bottom sheet growth ---
-    function setSheetHeight(clicks){
-      // Start growing after 2 clicks; feel smooth and “inevitable”
-      // Clamp so it never hides the question entirely.
-      const start = 2;
-      const maxVh = 60; // cap
-      const stepVh = 6; // each click adds ~6vh
-
-      const effective = Math.max(0, clicks - start);
-      const targetVh = Math.min(maxVh, effective * stepVh);
-
-      if (targetVh <= 0) {
-        document.body.classList.remove("sheet-active");
-        document.documentElement.style.setProperty("--sheetH", "0px");
-        yesSheet.setAttribute("aria-hidden", "true");
-        return;
-      }
-
-      document.body.classList.add("sheet-active");
-      yesSheet.setAttribute("aria-hidden", "false");
-      document.documentElement.style.setProperty("--sheetH", `${targetVh}vh`);
-    }
-
-    // --- No button movement (small + contained, doesn’t fight the sheet) ---
+    // --- No movement (small + iPhone friendly) ---
     let noOffset = { x: 0, y: 0 };
     function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
 
     function nudgeNoButton(){
-      if (prefersReducedMotion) return;
+      if (prefersReducedMotion || takeoverActive) return;
 
       const cardRect = card.getBoundingClientRect();
       const noRect = noBtn.getBoundingClientRect();
 
       const maxX = Math.max(0, (cardRect.width - (noRect.width + 36)) / 2);
-      const maxY = 30; // keep it subtle for iPhone
+      const maxY = 28;
 
-      const stepX = Math.min(36, maxX);
-      const stepY = maxY;
-
-      const dx = (Math.random() * 2 - 1) * stepX;
-      const dy = (Math.random() * 2 - 1) * stepY;
+      const dx = (Math.random() * 2 - 1) * Math.min(34, maxX);
+      const dy = (Math.random() * 2 - 1) * maxY;
 
       noOffset.x = clamp(noOffset.x + dx, -maxX, maxX);
       noOffset.y = clamp(noOffset.y + dy, -maxY, maxY);
@@ -337,44 +260,131 @@
       noBtn.style.transform = `translate(${noOffset.x}px, ${noOffset.y}px)`;
     }
 
+    // --- YES takeover using FLIP animation (same button, no extra element) ---
+    function startTakeover() {
+      if (takeoverActive) return;
+      takeoverActive = true;
+      document.body.classList.add("takeover");
+
+      // First: measure current button position/size
+      const start = yesBtn.getBoundingClientRect();
+
+      // Decide target area: below the question, down to bottom safe area,
+      // centered to match card width.
+      const cardRect = card.getBoundingClientRect();
+      const qRect = question.getBoundingClientRect();
+
+      const safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+
+      const targetLeft = cardRect.left;
+      const targetWidth = cardRect.width;
+
+      const gap = 10; // spacing under question
+      const targetTop = Math.min(qRect.bottom + gap, window.innerHeight * 0.55);
+
+      const targetBottom = window.innerHeight - safeBottom - 10;
+      const targetHeight = Math.max(120, targetBottom - targetTop);
+
+      // Move button to fixed at its current place
+      yesBtn.style.left = start.left + "px";
+      yesBtn.style.top = start.top + "px";
+      yesBtn.style.width = start.width + "px";
+      yesBtn.style.height = start.height + "px";
+      yesBtn.style.borderRadius = "16px";
+      yesBtn.style.transition = "none";
+      yesBtn.style.transform = "translateZ(0)";
+
+      // Force layout
+      yesBtn.getBoundingClientRect();
+
+      // Animate to target
+      const radius = 22;
+      const duration = prefersReducedMotion ? 0 : 260;
+
+      requestAnimationFrame(() => {
+        yesBtn.style.transition = `left ${duration}ms ease, top ${duration}ms ease, width ${duration}ms ease, height ${duration}ms ease, border-radius ${duration}ms ease, font-size ${duration}ms ease`;
+        yesBtn.style.left = targetLeft + "px";
+        yesBtn.style.top = targetTop + "px";
+        yesBtn.style.width = targetWidth + "px";
+        yesBtn.style.height = targetHeight + "px";
+        yesBtn.style.borderRadius = `${radius}px ${radius}px 16px 16px`;
+        yesBtn.style.fontSize = "clamp(26px, 7vw, 60px)";
+      });
+    }
+
     function onNo(){
       noClicks += 1;
-
       updateNoText(noClicks);
-      setSheetHeight(noClicks);   // ✅ sheet grows instead of scaling Yes
       nudgeNoButton();
       preloadBottomGif();
+
+      // Trigger takeover at the same time as your old fullscreen threshold
+      if (noClicks >= 8) startTakeover();
     }
 
     let transitioning = false;
+
+    function resetTakeoverStyles() {
+      takeoverActive = false;
+      document.body.classList.remove("takeover");
+
+      // Remove fixed positioning styles so it goes back into the layout cleanly
+      yesBtn.style.transition = "";
+      yesBtn.style.position = "";
+      yesBtn.style.left = "";
+      yesBtn.style.top = "";
+      yesBtn.style.width = "";
+      yesBtn.style.height = "";
+      yesBtn.style.borderRadius = "";
+      yesBtn.style.fontSize = "";
+      yesBtn.style.transform = "";
+    }
 
     function onYes(){
       if (transitioning) return;
       transitioning = true;
 
-      // Remove sheet
-      document.body.classList.remove("sheet-active");
-      document.documentElement.style.setProperty("--sheetH", "0px");
-      yesSheet.setAttribute("aria-hidden", "true");
-
       preloadBottomGif();
       if (!bottomReady) loadingHint.style.display = "block";
 
+      // Switch screens
       ask.style.display = "none";
       success.style.display = "block";
       bottomGif.src = BOTTOM_GIF;
 
-      // Reset (for cleanliness)
+      // Reset states
       noBtn.textContent = "No";
       noBtn.style.transform = "translate(0,0)";
       noOffset = { x: 0, y: 0 };
       loadingHint.style.display = "none";
+
+      resetTakeoverStyles();
     }
 
-    // Both Yes buttons trigger the same action
-    yesBtn.addEventListener("click", onYes);
-    sheetYesBtn.addEventListener("click", onYes);
     noBtn.addEventListener("click", onNo);
+    yesBtn.addEventListener("click", onYes);
+
+    // Keep takeover target correct if iPhone Safari resizes viewport
+    window.addEventListener("resize", () => {
+      if (!takeoverActive) return;
+      // Re-run takeover target placement instantly (no animation) to keep it aligned
+      const cardRect = card.getBoundingClientRect();
+      const qRect = question.getBoundingClientRect();
+      const safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+
+      const gap = 10;
+      const targetTop = Math.min(qRect.bottom + gap, window.innerHeight * 0.55);
+      const targetBottom = window.innerHeight - safeBottom - 10;
+      const targetHeight = Math.max(120, targetBottom - targetTop);
+
+      yesBtn.style.transition = "none";
+      yesBtn.style.left = cardRect.left + "px";
+      yesBtn.style.top = targetTop + "px";
+      yesBtn.style.width = cardRect.width + "px";
+      yesBtn.style.height = targetHeight + "px";
+      yesBtn.getBoundingClientRect();
+      requestAnimationFrame(() => yesBtn.style.transition = "");
+    }, { passive:true });
 
     // Optional keyboard support
     document.addEventListener("keydown", (e) => {
