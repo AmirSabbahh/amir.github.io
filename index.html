@@ -18,14 +18,11 @@
       min-height: 100vh;
       min-height: 100dvh;
       min-height: -webkit-fill-available;
-
       display:grid;
       place-items:center;
-
       background:var(--bg);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--text);
-
       padding:
         calc(12px + env(safe-area-inset-top))
         calc(12px + env(safe-area-inset-right))
@@ -43,7 +40,6 @@
       position: relative;
     }
 
-    /* iPhone-friendly GIF sizing (no forced square) */
     .gif{
       width: 100%;
       max-width: 420px;
@@ -64,16 +60,15 @@
       padding: 0 4px;
     }
 
-    /* ✅ Key: a locked, single-row bar so the card never reflows */
     .btnRow{
       width: 100%;
       height: 72px;                 /* locked height -> white card doesn't change */
       display:flex;
       align-items:center;
-      justify-content:flex-start;    /* ✅ keeps Yes anchored left */
-      gap: 12px;                     /* ✅ gap ensures they never touch */
-      flex-wrap: nowrap;             /* ✅ never wrap on iPhone */
-      overflow: hidden;              /* ✅ No can slide out, but doesn't affect layout */
+      justify-content:flex-start;    /* keeps Yes anchored left */
+      gap: 12px;                     /* ensures they never touch */
+      flex-wrap: nowrap;             /* never wrap on iPhone */
+      overflow: hidden;              /* No can slide out without affecting layout */
       margin-top: 6px;
       padding-bottom: 6px;
     }
@@ -95,7 +90,6 @@
     #yesBtn{
       background:#ff4d88;
       color:#fff;
-      /* starts at fixed width, then we animate width */
       width: 150px;
       flex: 0 0 auto;
       transition: width 220ms ease, border-radius 220ms ease, font-size 220ms ease;
@@ -231,49 +225,33 @@
       noBtn.textContent = NO_LINES[idx];
     }
 
-    /**
-     * ✅ Core behavior:
-     * - Yes widens inside btnRow (bounded)
-     * - No slides right smoothly until off-screen
-     * - Gap is preserved by flex gap; buttons never touch.
-     */
     function applyProgress(progress01){
       const gap = 12;
-
-      const rowRect = btnRow.getBoundingClientRect();
-      const rowW = rowRect.width;
+      const rowW = btnRow.getBoundingClientRect().width;
 
       const yesStartW = 150;
-      const noW = 150;
+      const yesMaxW = rowW - gap - 20; // keep breathing room
 
-      // Max width Yes can take while No is still "present" in the row (even if sliding away)
-      // We keep a minimum visible No width early; later it can be fully covered by being off-screen.
-      const yesMaxW = rowW - gap - 20; // keep a tiny breathing room
-
-      // Yes grows progressively, but always bounded within the white card
+      // Yes grows bounded inside white area
       const targetYesW = clamp(
         yesStartW + progress01 * (yesMaxW - yesStartW),
         yesStartW,
         yesMaxW
       );
-
       yesBtn.style.width = `${targetYesW}px`;
 
-      // As Yes grows, push No away to the right until it leaves the screen.
-      // We translate relative to its current position; use viewport width so it definitely exits.
-      const pushOut = window.innerWidth * 1.2; // enough to go fully off-screen
-      const noTranslate = progress01 * pushOut;
+      // ✅ Slower early push (ease curve)
+      const pushOut = window.innerWidth * 1.2;
+      const eased = Math.pow(progress01, 2.2); // slow early, faster later
+      const noTranslate = eased * pushOut;
 
-      // Fade a bit near the end (still smooth)
-      const opacity = 1 - 0.85 * Math.pow(progress01, 1.6);
+      const opacity = 1 - 0.85 * Math.pow(eased, 1.4);
 
       noBtn.style.transform = `translateX(${noTranslate}px)`;
       noBtn.style.opacity = String(opacity);
 
-      // Once it's basically gone, disable clicking it
-      if (progress01 > 0.75) noBtn.style.pointerEvents = "none";
+      if (progress01 > 0.88) noBtn.style.pointerEvents = "none";
 
-      // Make Yes feel more “takeover-y” without leaving bounds
       yesBtn.style.borderRadius = progress01 > 0.6 ? "20px" : "16px";
       yesBtn.style.fontSize = progress01 > 0.6 ? "22px" : "18px";
     }
@@ -283,8 +261,8 @@
       updateNoText(noClicks);
       preloadBottomGif();
 
-      // You can tune this: how many No clicks until No is fully gone
-      const maxClicksToPushOut = 9;
+      // ✅ More clicks before No is gone
+      const maxClicksToPushOut = 16;
       const progress = clamp(noClicks / maxClicksToPushOut, 0, 1);
 
       applyProgress(progress);
@@ -306,9 +284,8 @@
     noBtn.addEventListener("click", onNo);
     yesBtn.addEventListener("click", onYes);
 
-    // Keep bounds correct if iPhone Safari changes viewport
     window.addEventListener("resize", () => {
-      const maxClicksToPushOut = 9;
+      const maxClicksToPushOut = 16;
       const progress = clamp(noClicks / maxClicksToPushOut, 0, 1);
       applyProgress(progress);
     }, { passive:true });
