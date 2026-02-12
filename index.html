@@ -18,14 +18,11 @@
       min-height: 100vh;
       min-height: 100dvh;
       min-height: -webkit-fill-available;
-
       display:grid;
       place-items:center;
-
       background:var(--bg);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--text);
-
       padding:
         calc(12px + env(safe-area-inset-top))
         calc(12px + env(safe-area-inset-right))
@@ -43,13 +40,13 @@
       position: relative;
     }
 
-    /* ✅ iPhone-friendly GIF sizing: no forced square */
+    /* ✅ iPhone-friendly GIF sizing (no forced square) */
     .gif{
       width: 100%;
       max-width: 420px;
       height: auto;
-      max-height: 32dvh;
-      max-height: 32vh;
+      max-height: 30dvh;
+      max-height: 30vh;
       border-radius: 14px;
       display:block;
       margin: 0 auto 12px;
@@ -80,7 +77,7 @@
       cursor:pointer;
       border-radius: 16px;
       padding: 14px 20px;
-      min-height: 48px;     /* Apple touch target */
+      min-height: 48px;     /* iPhone touch target */
       min-width: 140px;
       font-size: 18px;
       font-weight: 800;
@@ -92,27 +89,30 @@
     #yesBtn{
       background:#ff4d88;
       color:#fff;
-      will-change: transform, width, height, left, top;
+      will-change: left, top, width, height, border-radius, font-size, transform;
     }
 
     #noBtn{
       background:#e9e9ef;
       color:#222;
-      position: relative;
-      will-change: transform;
-      transition: transform 140ms ease;
+      will-change: transform, opacity;
     }
 
-    /* ✅ During takeover, No cannot be clicked */
+    /* When we "take over", both buttons become fixed but placeholders keep layout stable */
+    body.takeover #yesBtn,
     body.takeover #noBtn{
-      pointer-events: none;
-    }
-
-    /* ✅ Yes takeover mode (same button, fixed) */
-    body.takeover #yesBtn{
       position: fixed;
       z-index: 9999;
       margin: 0;
+    }
+
+    /* placeholders so the white card doesn't reflow */
+    .placeholder{
+      display:inline-block;
+      border-radius: 16px;
+      min-height: 48px;
+      min-width: 140px;
+      visibility: hidden; /* occupies space but invisible */
     }
 
     #success { display:none; }
@@ -130,7 +130,11 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      #noBtn { transition: none; }
+      /* We'll still move, but without animation */
+      body.takeover #yesBtn,
+      body.takeover #noBtn{
+        transition: none !important;
+      }
     }
   </style>
 </head>
@@ -171,9 +175,11 @@
   </main>
 
   <script>
+    // Same GIFs as your original
     const TOP_GIF = "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif";
     const BOTTOM_GIF = "https://media.giphy.com/media/MDJ9IbxxvDUQM/giphy.gif";
 
+    // Option A - No text progression
     const NO_LINES = [
       "No",
       "Are you sure? 😳",
@@ -197,16 +203,16 @@
     const success= document.getElementById("success");
     const card   = document.getElementById("card");
     const btnRow = document.getElementById("btnRow");
+    const question = document.getElementById("question");
 
     const topGif = document.getElementById("topGif");
     const bottomGif = document.getElementById("bottomGif");
     const loadingHint = document.getElementById("loadingHint");
-    const question = document.getElementById("question");
 
     let noClicks = 0;
-    let takeoverActive = false;
+    let takeover = false;
 
-    // --- Preload bottom GIF smartly ---
+    // --- Preload bottom gif smartly ---
     let bottomReady = false;
     let preloadStarted = false;
 
@@ -232,165 +238,173 @@
 
     topGif.addEventListener("load", () => whenIdle(preloadBottomGif), { once:true });
 
-    // --- No text changes ---
+    // --- Helpers ---
+    function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+    function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
     function updateNoText(clicks){
       const idx = Math.min(clicks, NO_LINES.length - 1);
       noBtn.textContent = NO_LINES[idx];
     }
 
-    // --- No movement (small + iPhone friendly) ---
-    let noOffset = { x: 0, y: 0 };
-    function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+    // Keep layout stable: insert placeholders so removing buttons from flow doesn't change card size
+    let yesPH, noPH, rowLockedHeight = null;
+    function lockRowLayout() {
+      if (rowLockedHeight != null) return;
+      rowLockedHeight = btnRow.getBoundingClientRect().height;
+      btnRow.style.height = rowLockedHeight + "px";  // ✅ prevents white card reflow
 
-    function nudgeNoButton(){
-      if (prefersReducedMotion || takeoverActive) return;
+      yesPH = document.createElement("span");
+      yesPH.className = "placeholder";
+      yesPH.style.width = yesBtn.getBoundingClientRect().width + "px";
+      yesPH.style.height = yesBtn.getBoundingClientRect().height + "px";
 
-      const cardRect = card.getBoundingClientRect();
-      const noRect = noBtn.getBoundingClientRect();
+      noPH = document.createElement("span");
+      noPH.className = "placeholder";
+      noPH.style.width = noBtn.getBoundingClientRect().width + "px";
+      noPH.style.height = noBtn.getBoundingClientRect().height + "px";
 
-      const maxX = Math.max(0, (cardRect.width - (noRect.width + 36)) / 2);
-      const maxY = 28;
+      // Put placeholders exactly where buttons were
+      btnRow.replaceChild(yesPH, yesBtn);
+      btnRow.replaceChild(noPH, noBtn);
 
-      const dx = (Math.random() * 2 - 1) * Math.min(34, maxX);
-      const dy = (Math.random() * 2 - 1) * maxY;
-
-      noOffset.x = clamp(noOffset.x + dx, -maxX, maxX);
-      noOffset.y = clamp(noOffset.y + dy, -maxY, maxY);
-
-      noBtn.style.transform = `translate(${noOffset.x}px, ${noOffset.y}px)`;
+      // Add real buttons to body so they can be fixed without affecting layout
+      document.body.appendChild(yesBtn);
+      document.body.appendChild(noBtn);
     }
 
-    // --- YES takeover using FLIP animation (same button, no extra element) ---
-    function startTakeover() {
-      if (takeoverActive) return;
-      takeoverActive = true;
+    // Capture starting rects (first time takeover begins)
+    let yesStartRect, noStartRect;
+    function beginTakeoverIfNeeded() {
+      if (takeover) return;
+      takeover = true;
+
+      // measure before locking
+      yesStartRect = yesBtn.getBoundingClientRect();
+      noStartRect  = noBtn.getBoundingClientRect();
+
+      lockRowLayout();
+
+      // Place fixed buttons exactly where they started
       document.body.classList.add("takeover");
 
-      // First: measure current button position/size
-      const start = yesBtn.getBoundingClientRect();
+      yesBtn.style.left = yesStartRect.left + "px";
+      yesBtn.style.top  = yesStartRect.top  + "px";
+      yesBtn.style.width  = yesStartRect.width  + "px";
+      yesBtn.style.height = yesStartRect.height + "px";
+      yesBtn.style.borderRadius = "16px";
+      yesBtn.style.transition = prefersReducedMotion ? "none" : "all 220ms ease";
 
-      // Decide target area: below the question, down to bottom safe area,
-      // centered to match card width.
+      noBtn.style.left = noStartRect.left + "px";
+      noBtn.style.top  = noStartRect.top  + "px";
+      noBtn.style.width  = noStartRect.width  + "px";
+      noBtn.style.height = noStartRect.height + "px";
+      noBtn.style.borderRadius = "16px";
+      noBtn.style.transition = prefersReducedMotion ? "none" : "transform 220ms ease, opacity 220ms ease";
+      noBtn.style.opacity = "1";
+    }
+
+    function computeYesEndRect() {
       const cardRect = card.getBoundingClientRect();
       const qRect = question.getBoundingClientRect();
 
+      // Keep question visible: YES begins BELOW question
+      const gap = 10;
+      const top = qRect.bottom + gap;
+
       const safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+      const bottom = window.innerHeight - safeBottom - 10;
 
-      const targetLeft = cardRect.left;
-      const targetWidth = cardRect.width;
+      const height = Math.max(120, bottom - top);
 
-      const gap = 10; // spacing under question
-      const targetTop = Math.min(qRect.bottom + gap, window.innerHeight * 0.55);
+      return {
+        left: cardRect.left,
+        top,
+        width: cardRect.width,
+        height
+      };
+    }
 
-      const targetBottom = window.innerHeight - safeBottom - 10;
-      const targetHeight = Math.max(120, targetBottom - targetTop);
+    function applyProgress(progress01) {
+      // progress01: 0..1 (Yes expands; No moves away)
+      const t = easeOutCubic(progress01);
 
-      // Move button to fixed at its current place
-      yesBtn.style.left = start.left + "px";
-      yesBtn.style.top = start.top + "px";
-      yesBtn.style.width = start.width + "px";
-      yesBtn.style.height = start.height + "px";
-      yesBtn.style.borderRadius = "16px";
-      yesBtn.style.transition = "none";
-      yesBtn.style.transform = "translateZ(0)";
+      const end = computeYesEndRect();
 
-      // Force layout
-      yesBtn.getBoundingClientRect();
+      // Interpolate YES rect from its start to end (only expanding downward area)
+      const left   = yesStartRect.left   + (end.left   - yesStartRect.left)   * t;
+      const top    = yesStartRect.top    + (end.top    - yesStartRect.top)    * t;
+      const width  = yesStartRect.width  + (end.width  - yesStartRect.width)  * t;
+      const height = yesStartRect.height + (end.height - yesStartRect.height) * t;
 
-      // Animate to target
-      const radius = 22;
-      const duration = prefersReducedMotion ? 0 : 260;
+      yesBtn.style.left = left + "px";
+      yesBtn.style.top  = top + "px";
+      yesBtn.style.width  = width + "px";
+      yesBtn.style.height = height + "px";
+      yesBtn.style.borderRadius = `${22}px ${22}px 16px 16px`;
+      yesBtn.style.fontSize = `clamp(18px, ${18 + 18*t}px, 60px)`;
 
-      requestAnimationFrame(() => {
-        yesBtn.style.transition = `left ${duration}ms ease, top ${duration}ms ease, width ${duration}ms ease, height ${duration}ms ease, border-radius ${duration}ms ease, font-size ${duration}ms ease`;
-        yesBtn.style.left = targetLeft + "px";
-        yesBtn.style.top = targetTop + "px";
-        yesBtn.style.width = targetWidth + "px";
-        yesBtn.style.height = targetHeight + "px";
-        yesBtn.style.borderRadius = `${radius}px ${radius}px 16px 16px`;
-        yesBtn.style.fontSize = "clamp(26px, 7vw, 60px)";
-      });
+      // NO smoothly moves away (no teleport). It gets "pushed" sideways and a bit up.
+      const pushX = 140;           // how far it slides
+      const pushY = -30;           // slight upward
+      const scale = 1 - 0.12*t;    // tiny shrink, still visible
+      const opacity = 1 - 0.65*t;  // fades gradually, not instant
+
+      noBtn.style.transform = `translate(${pushX*t}px, ${pushY*t}px) scale(${scale})`;
+      noBtn.style.opacity = String(opacity);
+
+      // Once Yes is basically covering the area, No becomes effectively unclickable
+      if (progress01 >= 0.92) noBtn.style.pointerEvents = "none";
     }
 
     function onNo(){
       noClicks += 1;
       updateNoText(noClicks);
-      nudgeNoButton();
       preloadBottomGif();
 
-      // Trigger takeover at the same time as your old fullscreen threshold
-      if (noClicks >= 8) startTakeover();
+      // start takeover early so it feels progressive (not sudden)
+      beginTakeoverIfNeeded();
+
+      // Map clicks to progress:
+      // from click 1 -> small growth, click 10 -> near full takeover
+      const maxClicksToFill = 10;
+      const progress = clamp(noClicks / maxClicksToFill, 0, 1);
+
+      applyProgress(progress);
     }
+
+    // Keep alignment correct on iPhone Safari viewport changes
+    window.addEventListener("resize", () => {
+      if (!takeover) return;
+      const maxClicksToFill = 10;
+      const progress = clamp(noClicks / maxClicksToFill, 0, 1);
+      yesBtn.style.transition = "none";
+      noBtn.style.transition = "none";
+      applyProgress(progress);
+      // restore transitions
+      requestAnimationFrame(() => {
+        yesBtn.style.transition = prefersReducedMotion ? "none" : "all 220ms ease";
+        noBtn.style.transition  = prefersReducedMotion ? "none" : "transform 220ms ease, opacity 220ms ease";
+      });
+    }, { passive:true });
 
     let transitioning = false;
-
-    function resetTakeoverStyles() {
-      takeoverActive = false;
-      document.body.classList.remove("takeover");
-
-      // Remove fixed positioning styles so it goes back into the layout cleanly
-      yesBtn.style.transition = "";
-      yesBtn.style.position = "";
-      yesBtn.style.left = "";
-      yesBtn.style.top = "";
-      yesBtn.style.width = "";
-      yesBtn.style.height = "";
-      yesBtn.style.borderRadius = "";
-      yesBtn.style.fontSize = "";
-      yesBtn.style.transform = "";
-    }
 
     function onYes(){
       if (transitioning) return;
       transitioning = true;
 
       preloadBottomGif();
-      if (!bottomReady) loadingHint.style.display = "block";
 
-      // Switch screens
       ask.style.display = "none";
       success.style.display = "block";
       bottomGif.src = BOTTOM_GIF;
 
-      // Reset states
-      noBtn.textContent = "No";
-      noBtn.style.transform = "translate(0,0)";
-      noOffset = { x: 0, y: 0 };
-      loadingHint.style.display = "none";
-
-      resetTakeoverStyles();
+      // (No need to "restore" layout since you’re now on success screen.)
     }
 
     noBtn.addEventListener("click", onNo);
     yesBtn.addEventListener("click", onYes);
-
-    // Keep takeover target correct if iPhone Safari resizes viewport
-    window.addEventListener("resize", () => {
-      if (!takeoverActive) return;
-      // Re-run takeover target placement instantly (no animation) to keep it aligned
-      const cardRect = card.getBoundingClientRect();
-      const qRect = question.getBoundingClientRect();
-      const safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
-
-      const gap = 10;
-      const targetTop = Math.min(qRect.bottom + gap, window.innerHeight * 0.55);
-      const targetBottom = window.innerHeight - safeBottom - 10;
-      const targetHeight = Math.max(120, targetBottom - targetTop);
-
-      yesBtn.style.transition = "none";
-      yesBtn.style.left = cardRect.left + "px";
-      yesBtn.style.top = targetTop + "px";
-      yesBtn.style.width = cardRect.width + "px";
-      yesBtn.style.height = targetHeight + "px";
-      yesBtn.getBoundingClientRect();
-      requestAnimationFrame(() => yesBtn.style.transition = "");
-    }, { passive:true });
-
-    // Optional keyboard support
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") onYes();
-      if (e.key === "Escape") onNo();
-    });
   </script>
 </body>
 </html>
