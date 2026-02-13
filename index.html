@@ -18,11 +18,14 @@
       min-height: 100vh;
       min-height: 100dvh;
       min-height: -webkit-fill-available;
+
       display:grid;
       place-items:center;
+
       background:var(--bg);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--text);
+
       padding:
         calc(12px + env(safe-area-inset-top))
         calc(12px + env(safe-area-inset-right))
@@ -40,12 +43,13 @@
       position: relative;
     }
 
+    /* iPhone-friendly GIF sizing */
     .gif{
       width: 100%;
       max-width: 420px;
       height: auto;
-      max-height: 30dvh;
-      max-height: 30vh;
+      max-height: 28dvh;
+      max-height: 28vh;
       border-radius: 14px;
       display:block;
       margin: 0 auto 12px;
@@ -55,54 +59,72 @@
 
     h1{
       font-size: clamp(22px, 5.5vw, 34px);
-      margin: 6px 0 14px;
+      margin: 6px 0 12px;
       line-height: 1.15;
       padding: 0 4px;
     }
 
-    .btnRow{
+    /* Fixed area so white card doesn't resize */
+    #controlsArea{
+      position: relative;
       width: 100%;
-      height: 72px;                 /* locked height -> white card doesn't change */
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;    /* keeps Yes anchored left */
-      gap: 12px;                     /* ensures they never touch */
-      flex-wrap: nowrap;             /* never wrap on iPhone */
-      overflow: hidden;              /* No can slide out without affecting layout */
-      margin-top: 6px;
-      padding-bottom: 6px;
+      height: clamp(92px, 20vh, 180px);
+      margin-top: 8px;
+      overflow: hidden; /* ✅ No slides out cleanly */
     }
 
     button{
       border:0;
       cursor:pointer;
-      border-radius: 16px;
-      padding: 14px 14px;
-      min-height: 48px;              /* iPhone touch target */
-      font-size: 18px;
-      font-weight: 800;
       user-select: none;
       touch-action: manipulation;
-      line-height: 1.1;
-      white-space: nowrap;
+
+      border-radius: 16px;
+      padding: 12px 14px;
+      min-height: 48px;
+      font-weight: 900;
+      line-height: 1.05;
+
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
     }
 
     #yesBtn{
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 150px;
+      height: 52px;
+
       background:#ff4d88;
       color:#fff;
-      width: 150px;
-      flex: 0 0 auto;
-      transition: width 220ms ease, border-radius 220ms ease, font-size 220ms ease;
-      will-change: width;
+
+      will-change: width, height, border-radius, font-size;
+      transition: width 220ms ease, height 220ms ease, border-radius 220ms ease, font-size 220ms ease;
     }
 
     #noBtn{
+      position: absolute;
+      bottom: 0;
+      left: calc(150px + 12px);
+      width: 150px;
+      height: 52px;
+
       background:#e9e9ef;
       color:#222;
-      width: 150px;
-      flex: 0 0 auto;
-      transition: transform 260ms ease, opacity 260ms ease;
-      will-change: transform, opacity;
+
+      font-size: 14px;
+      padding: 10px 12px;
+
+      display:-webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow:hidden;
+
+      will-change: left, opacity;
+      transition: left 220ms ease, opacity 220ms ease;
     }
 
     #success { display:none; }
@@ -139,7 +161,7 @@
 
       <h1 id="question">Will you be my valentine? 💘</h1>
 
-      <div class="btnRow" id="btnRow">
+      <div id="controlsArea">
         <button id="yesBtn" type="button">Yes</button>
         <button id="noBtn" type="button">No</button>
       </div>
@@ -181,7 +203,7 @@
 
     const yesBtn = document.getElementById("yesBtn");
     const noBtn  = document.getElementById("noBtn");
-    const btnRow = document.getElementById("btnRow");
+    const controlsArea = document.getElementById("controlsArea");
 
     const ask    = document.getElementById("ask");
     const success= document.getElementById("success");
@@ -189,9 +211,16 @@
     const bottomGif = document.getElementById("bottomGif");
     const loadingHint = document.getElementById("loadingHint");
 
+    const GAP = 12;          // ✅ constant space between Yes and No
+    const NO_W = 150;
+    const YES_BASE = 150;
+
+    // Increase this to allow more No presses (still constant pace)
+    const MAX_CLICKS = 28;
+
     let noClicks = 0;
 
-    // --- preload bottom gif ---
+    // preload bottom gif
     let bottomReady = false;
     let preloadStarted = false;
 
@@ -217,43 +246,52 @@
 
     topGif.addEventListener("load", () => whenIdle(preloadBottomGif), { once:true });
 
-    // --- helpers ---
     function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+    function lerp(a, b, t){ return a + (b - a) * t; }
 
     function updateNoText(clicks){
       const idx = Math.min(clicks, NO_LINES.length - 1);
       noBtn.textContent = NO_LINES[idx];
     }
 
-    function applyProgress(progress01){
-      const gap = 12;
-      const rowW = btnRow.getBoundingClientRect().width;
+    // Cached bounds
+    let areaW, areaH, yesMinW, yesMaxW, yesMinH, yesMaxH;
 
-      const yesStartW = 150;
-      const yesMaxW = rowW - gap - 20; // keep breathing room
+    function recomputeBounds(){
+      const r = controlsArea.getBoundingClientRect();
+      areaW = r.width;
+      areaH = r.height;
 
-      // Yes grows bounded inside white area
-      const targetYesW = clamp(
-        yesStartW + progress01 * (yesMaxW - yesStartW),
-        yesStartW,
-        yesMaxW
-      );
-      yesBtn.style.width = `${targetYesW}px`;
+      // Ensure both fit at start: yes + gap + no <= area
+      const maxYesStart = Math.max(110, areaW - GAP - NO_W);
+      yesMinW = Math.min(YES_BASE, maxYesStart);
 
-      // ✅ Slower early push (ease curve)
-      const pushOut = window.innerWidth * 1.2;
-      const eased = Math.pow(progress01, 2.2); // slow early, faster later
-      const noTranslate = eased * pushOut;
+      yesMinH = 52;
 
-      const opacity = 1 - 0.85 * Math.pow(eased, 1.4);
+      // Yes fills entire controls area (still below the question)
+      yesMaxW = areaW;
+      yesMaxH = areaH;
+    }
 
-      noBtn.style.transform = `translateX(${noTranslate}px)`;
-      noBtn.style.opacity = String(opacity);
+    function applyProgressLinear(progress01){
+      // Linear growth (constant pace)
+      const yesW = lerp(yesMinW, yesMaxW, progress01);
+      const yesH = lerp(yesMinH, yesMaxH, progress01);
 
-      if (progress01 > 0.88) noBtn.style.pointerEvents = "none";
+      yesBtn.style.width  = `${yesW}px`;
+      yesBtn.style.height = `${yesH}px`;
+      yesBtn.style.borderRadius = progress01 > 0.6 ? "22px" : "16px";
+      yesBtn.style.fontSize = `${lerp(18, 34, progress01)}px`;
 
-      yesBtn.style.borderRadius = progress01 > 0.6 ? "20px" : "16px";
-      yesBtn.style.fontSize = progress01 > 0.6 ? "22px" : "18px";
+      // ✅ Constant gap ALWAYS
+      const noLeft = yesW + GAP;
+      noBtn.style.left = `${noLeft}px`;
+
+      // Fade slightly near the end (optional)
+      noBtn.style.opacity = String(lerp(1, 0.35, progress01));
+
+      // Disable when Yes fully fills the area (No is entirely clipped)
+      noBtn.style.pointerEvents = (progress01 >= 0.999) ? "none" : "auto";
     }
 
     function onNo(){
@@ -261,15 +299,11 @@
       updateNoText(noClicks);
       preloadBottomGif();
 
-      // ✅ More clicks before No is gone
-      const maxClicksToPushOut = 16;
-      const progress = clamp(noClicks / maxClicksToPushOut, 0, 1);
-
-      applyProgress(progress);
+      const progress = clamp(noClicks / MAX_CLICKS, 0, 1);
+      applyProgressLinear(progress);
     }
 
     let transitioning = false;
-
     function onYes(){
       if (transitioning) return;
       transitioning = true;
@@ -281,13 +315,17 @@
       bottomGif.src = BOTTOM_GIF;
     }
 
+    // Init
+    recomputeBounds();
+    applyProgressLinear(0);
+
     noBtn.addEventListener("click", onNo);
     yesBtn.addEventListener("click", onYes);
 
     window.addEventListener("resize", () => {
-      const maxClicksToPushOut = 16;
-      const progress = clamp(noClicks / maxClicksToPushOut, 0, 1);
-      applyProgress(progress);
+      recomputeBounds();
+      const progress = clamp(noClicks / MAX_CLICKS, 0, 1);
+      applyProgressLinear(progress);
     }, { passive:true });
   </script>
 </body>
