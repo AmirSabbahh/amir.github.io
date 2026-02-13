@@ -9,7 +9,6 @@
 
   <style>
     :root { --bg:#fff7fb; --text:#1f1f1f; }
-
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; }
 
@@ -18,14 +17,11 @@
       min-height: 100vh;
       min-height: 100dvh;
       min-height: -webkit-fill-available;
-
       display:grid;
       place-items:center;
-
       background:var(--bg);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--text);
-
       padding:
         calc(12px + env(safe-area-inset-top))
         calc(12px + env(safe-area-inset-right))
@@ -43,7 +39,6 @@
       position: relative;
     }
 
-    /* iPhone-friendly GIF sizing */
     .gif{
       width: 100%;
       max-width: 420px;
@@ -64,13 +59,13 @@
       padding: 0 4px;
     }
 
-    /* Fixed area so white card doesn't resize */
+    /* Fixed area below the question (white card never resizes) */
     #controlsArea{
       position: relative;
       width: 100%;
       height: clamp(92px, 20vh, 180px);
       margin-top: 8px;
-      overflow: hidden; /* ✅ No slides out cleanly */
+      overflow: hidden; /* ✅ No can slide out without changing layout */
     }
 
     button{
@@ -78,13 +73,11 @@
       cursor:pointer;
       user-select: none;
       touch-action: manipulation;
-
       border-radius: 16px;
       padding: 12px 14px;
       min-height: 48px;
       font-weight: 900;
       line-height: 1.05;
-
       display:flex;
       align-items:center;
       justify-content:center;
@@ -97,10 +90,8 @@
       bottom: 0;
       width: 150px;
       height: 52px;
-
       background:#ff4d88;
       color:#fff;
-
       will-change: width, height, border-radius, font-size;
       transition: width 220ms ease, height 220ms ease, border-radius 220ms ease, font-size 220ms ease;
     }
@@ -111,13 +102,12 @@
       left: calc(150px + 12px);
       width: 150px;
       height: 52px;
-
       background:#e9e9ef;
       color:#222;
-
       font-size: 14px;
       padding: 10px 12px;
 
+      /* keep long phrases nice on iPhone */
       display:-webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
@@ -211,12 +201,10 @@
     const bottomGif = document.getElementById("bottomGif");
     const loadingHint = document.getElementById("loadingHint");
 
-    const GAP = 12;          // ✅ constant space between Yes and No
-    const NO_W = 150;
-    const YES_BASE = 150;
+    const GAP = 12; // ✅ constant space between Yes and No
 
-    // Increase this to allow more No presses (still constant pace)
-    const MAX_CLICKS = 28;
+    // ✅ This is the key: full takeover happens exactly when the last line is reached.
+    const FULL_TAKEOVER_CLICKS = NO_LINES.length - 1; // last line shows at this click
 
     let noClicks = 0;
 
@@ -262,19 +250,22 @@
       areaW = r.width;
       areaH = r.height;
 
-      // Ensure both fit at start: yes + gap + no <= area
-      const maxYesStart = Math.max(110, areaW - GAP - NO_W);
-      yesMinW = Math.min(YES_BASE, maxYesStart);
-
+      // start size
+      yesMinW = Math.min(150, Math.max(120, areaW * 0.45));
       yesMinH = 52;
 
-      // Yes fills entire controls area (still below the question)
+      // end size fills the whole controls area
       yesMaxW = areaW;
       yesMaxH = areaH;
+
+      // place No at start with constant gap
+      noBtn.style.left = `${yesMinW + GAP}px`;
+      yesBtn.style.width = `${yesMinW}px`;
+      yesBtn.style.height = `${yesMinH}px`;
     }
 
     function applyProgressLinear(progress01){
-      // Linear growth (constant pace)
+      // Yes grows linearly, constant pace
       const yesW = lerp(yesMinW, yesMaxW, progress01);
       const yesH = lerp(yesMinH, yesMaxH, progress01);
 
@@ -283,15 +274,17 @@
       yesBtn.style.borderRadius = progress01 > 0.6 ? "22px" : "16px";
       yesBtn.style.fontSize = `${lerp(18, 34, progress01)}px`;
 
-      // ✅ Constant gap ALWAYS
+      // ✅ constant gap ALWAYS; No gets pushed purely by Yes growth
       const noLeft = yesW + GAP;
       noBtn.style.left = `${noLeft}px`;
 
-      // Fade slightly near the end (optional)
-      noBtn.style.opacity = String(lerp(1, 0.35, progress01));
+      // keep No visible until late, then fade a bit (optional)
+      const fadeStart = 0.85;
+      const opacity = progress01 < fadeStart ? 1 : lerp(1, 0.35, (progress01 - fadeStart) / (1 - fadeStart));
+      noBtn.style.opacity = String(opacity);
 
-      // Disable when Yes fully fills the area (No is entirely clipped)
-      noBtn.style.pointerEvents = (progress01 >= 0.999) ? "none" : "auto";
+      // When fully taken over, No is fully outside (clipped)
+      noBtn.style.pointerEvents = (progress01 >= 1) ? "none" : "auto";
     }
 
     function onNo(){
@@ -299,7 +292,8 @@
       updateNoText(noClicks);
       preloadBottomGif();
 
-      const progress = clamp(noClicks / MAX_CLICKS, 0, 1);
+      // ✅ Progress matches the message sequence
+      const progress = clamp(noClicks / FULL_TAKEOVER_CLICKS, 0, 1);
       applyProgressLinear(progress);
     }
 
@@ -309,7 +303,6 @@
       transitioning = true;
 
       preloadBottomGif();
-
       ask.style.display = "none";
       success.style.display = "block";
       bottomGif.src = BOTTOM_GIF;
@@ -324,7 +317,7 @@
 
     window.addEventListener("resize", () => {
       recomputeBounds();
-      const progress = clamp(noClicks / MAX_CLICKS, 0, 1);
+      const progress = clamp(noClicks / FULL_TAKEOVER_CLICKS, 0, 1);
       applyProgressLinear(progress);
     }, { passive:true });
   </script>
